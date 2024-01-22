@@ -1,0 +1,125 @@
+#-*- coding: utf-8 -*-
+#
+#                          Shadow-Box
+#                         ------------
+#      Lightweight Hypervisor-Based Kernel Protector
+#
+#               Copyright (C) 2017 Seunghun Han
+#
+ 
+# This software has GPL v2 license. See the GPL_LICENSE file.
+
+import sys 
+import glob
+import os
+
+kernel_version = []
+symbol_table_array = []
+
+# Search system.map directory and make tables. 
+def make_symbol_table_in_directory():
+	filelist = glob.glob("system.map/*")
+
+	# Extract kernel version
+	for item in filelist:
+		item = item.replace("system.map/", "")
+		item = item.replace(".map", "")
+		kernel_version.append(item)
+
+	# Make symbol table
+	for item in filelist:
+		output = get_symbol_table_from_file(item)
+		symbol_table_array.append(output);
+
+# Extact symbol from system.map
+def get_symbol_table_from_file(filename):
+	symbol_list = [
+		"_text",
+		"_etext",
+		"__start___ex_table",
+		"__stop___ex_table",
+		"__start_rodata",
+		"__end_rodata", 
+		"modules",
+		"tasklist_lock",
+		"init_level4_pgt",	# under v4.13.0
+		"init_top_pgt",		# upper v4.13.0
+		"init_mm",
+		"wake_up_new_task",
+		"proc_flush_task",
+		"module_bug_finalize",
+		"module_bug_cleanup",
+		"walk_system_ram_range",
+
+		"logbuf_lock",
+
+		# Symbols for Machine Check Error
+		"check_interval",
+		"mce_timer_delete_all",
+		"mce_cpu_restart",
+
+		# Symbol for terminating malware
+		"do_send_sig_info",
+
+		# Symbols for Workaround 
+		"__ip_select_ident",
+		"secure_dccpv6_sequence_number",
+		"secure_ipv4_port_ephemeral",
+		"netif_receive_skb_internal",
+		"__netif_receive_skb_core",
+		"netif_rx_internal",
+	]
+
+	symbol_table = []
+	
+	fp_input = open(filename, "r")
+	data_list = fp_input.readlines()
+
+	found = 0
+	for data in data_list:
+		data_item = data.split(" ");
+
+		data_item[2] = data_item[2].replace("\n", "")
+		for symbol in symbol_list:
+			if (symbol == data_item[2]):
+				found = found + 1
+				symbol_table.append([data_item[2], data_item[0]])
+
+
+	# init_level4_pgt and init_top_pgt is same, so found variable is compared with
+	# len(symbol_list) - 1.
+	if (found != len(symbol_list) - 1):
+		print "    [WARNING] %s symbol find fail" % filename
+	else:
+		print "    [SUCCESS] %s symbol find success" % filename
+
+	return symbol_table
+
+# main
+if __name__ == "__main__":
+	fp_output = open("symbol.h", "w")
+	make_symbol_table_in_directory()
+	
+	# Write kernel version.
+	fp_output.write("char* g_kernel_version[] = \n{\n");
+	for item in kernel_version:
+		fp_output.write('\t"%s",\n' % item)
+	fp_output.write("};\n\n");
+
+	# Write symbol table.
+	fp_output.write("struct sb_symbol_table_struct g_symbol_table_array[] =\n{\n");
+	table_index = 0
+	for item in symbol_table_array:
+		fp_output.write("\t//%s\n" %  kernel_version[table_index])
+		fp_output.write("\t{\n")
+		fp_output.write("\t\t{\n")
+
+		for table in item:
+			fp_output.write('\t\t\t{"%s", 0x%s},\n' % (table[0], table[1]))
+
+		fp_output.write("\t\t},\n")
+		fp_output.write("\t},\n")
+
+		table_index = table_index + 1
+	fp_output.write("};\n\n");
+	sys.exit(0)
